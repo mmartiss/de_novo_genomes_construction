@@ -1,9 +1,9 @@
 #!/bin/bash
 
-INPUT_FILE="access_sra.tsv"     # input assembly ir sra
-OUTPUT_TABLE="run_info.tsv"     # Rezultatu lentele
-LOG_FILE="download_ena.log"     # Log failas
-DOWNLOAD_DIR="runs"             # runs direktorija
+INPUT_FILE="files/access_sra.tsv"     # input assembly ir sra
+OUTPUT_TABLE="files/run_info.tsv"     # Rezultatu lentele
+LOG_FILE="files/download_ena.log"     # Log failas
+DOWNLOAD_DIR="files/runs"             # runs direktorija
 
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
