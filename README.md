@@ -1,18 +1,17 @@
-Paleidimas:
-1. download_runs.sh
-2. main.sh
+Sita direktorija paruosta google hpc paleidimui.
+ - nebent reiketu dar sutvarkyti resursu naudojima
 
-nenurodziau source miniforge.
-nera update_tbdb.
-nera lygegretaus darbo, viskas po viena.
+Yra pridetas dockerfile, kuris sutvarko ir suruosa visas conda envs.
+Tada reikes jungtis i dockerfile ir paleisti failus sia tvarka:
+1. data direktorijoje download.sh
+2. pipeline direktorijoje main.sh
 
-pridejau master log, i log ir i ekrana
-turiu padares automatini threads nustatyma, bet gal reiktu uzdeti fiksuota.
-turiu sudejes kiekvienam step conda activate ir deactivate, pagal envs aprasymus zemiau.
+---------------------------------------------------------------------
+Su docker issprestos problemos su tb-profiler aplinka ir nanofilt.
+Sios dvi aplinkos atskirtos.
+Snippy isspresta kodo problema
+ - downgradinau samtools i 1.7 versija
 
-Envs:
- - tbprofiler (inside of it:)
-    - tb-profiler
-    - nanofilt
-    - snippy
- - autocycler
+---------------------------------------------------------------------
+Testinis raw read, kuris praeina visus testus yra:
+ - 
