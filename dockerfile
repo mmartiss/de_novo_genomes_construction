@@ -17,11 +17,7 @@ RUN mamba create -n nanofilt -c bioconda -c conda-forge nanofilt -y
 
 RUN mamba create -n autocycler -c bioconda -c conda-forge autocycler -y
 
-RUN mamba create -n snippy -c conda-forge -c bioconda \
-    snippy \
-    samtools=1.7 \
-    perl-bioperl -y && \
-    conda clean -afy
+RUN mamba create -n snippy -c conda-forge -c bioconda -c defaults snippy perl-bioperl samtools=1.15
 
 RUN echo "source /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc
 
