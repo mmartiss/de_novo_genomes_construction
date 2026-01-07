@@ -1,26 +1,21 @@
 #!/bin/bash
 
 # ================= CONFIGURATION =================
-CONDA_PATH=$(conda info --base)/etc/profile.d/conda.sh
+CONDA_BASE_DIR="$HOME/miniforge3"
 
-READS_DIR="/home/ubuntu/data/reads"
-WORK_DIR="/home/ubuntu/pipeline"
-REF_GENOME="/home/ubuntu/data/h37rv/GCF_000195955.2_ASM19595v2_genomic.fna"
+READS_DIR="/home/marabr/kursinio_projektas/data/testukas"
+WORK_DIR="/home/marabr/kursinio_projektas/pipeline"
+REF_GENOME="/home/marabr/kursinio_projektas/data/h37rv/GCF_000195955.2_ASM19595v2_genomic.fna"
 
+# Nustatyti kiek nori priklausomai nuo paleidimo
 THREADS=4
-
 set -e
-set -u
 
 # ================= SETUP CONDA =================
-if [ -f "$CONDA_PATH" ]; then
-    source "$CONDA_PATH"
-else
-    echo "KLAIDA: Nerastas conda.sh faile $CONDA_PATH"
-    exit 1
-fi
-
+#source "${CONDA_BASE_DIR}/etc/profile.d/conda.sh"
+source /root/miniconda3/etc/profile.d/conda.sh
 # ================= MAIN LOOP =================
+
 shopt -s nullglob
 FILES=(${READS_DIR}/*.fastq*)
 shopt -u nullglob
@@ -34,12 +29,13 @@ echo "Found ${#FILES[@]} samples. Starting pipeline..."
 
 for INPUT_FILE in "${FILES[@]}"; do
 
+    # --- PREPARE VARIABLES ---
     PREFIX=$(basename "$INPUT_FILE" | sed -E 's/(\.fastq|\.fq)(\.gz)?$//')
 
     TBPROF_DIR="$WORK_DIR/tbprofiler_results/${PREFIX}"
     FILT_DIR="$WORK_DIR/filtered_reads"
     ASSEMBLY_DIR="$WORK_DIR/assemblies/${PREFIX}"
-    SNIPPY_DIR="$WORK_DIR/snippy_results/${PREFIX}"
+    SNIPPY_DIR="$WORK_DIR/snippy_vs_assembly/${PREFIX}"
     LOGS_DIR="$WORK_DIR/logs/${PREFIX}"
     AUTO_OUT="$WORK_DIR/autocycler_out_${PREFIX}"
 
@@ -51,33 +47,53 @@ for INPUT_FILE in "${FILES[@]}"; do
     AUTO_LOG="$LOGS_DIR/autocycler_full.log"
 
     echo "=================================================="
-    echo "PROCESSING: $PREFIX"
+    echo "Processing: $PREFIX"
     echo "=================================================="
+
+    cd "$WORK_DIR"
 
     # ================= STEP 1: TB-PROFILER =================
     if [ -f "$TBPROF_DIR/results/${PREFIX}_nano.results.json" ]; then
-        echo "[SKIP] TB-Profiler already done"
+        echo "[SKIP] TB-Profiler already done for $PREFIX"
     else
         echo "[RUN] TB-Profiler..."
-        conda activate tb-profiler
-        tb-profiler profile -m nanopore -1 "$INPUT_FILE" -p "${PREFIX}_nano" --dir "$TBPROF_DIR" --txt --call_whole_genome > "$TBPROF_LOG" 2>&1
+        conda activate tbprofiler
+        {
+            tb-profiler profile -m nanopore -1 "$INPUT_FILE" -p "${PREFIX}_nano" --dir "$TBPROF_DIR" --txt --call_whole_genome
+        } > "$TBPROF_LOG" 2>&1
         conda deactivate
     fi
 
-    # ================= STEP 2: NANOFILT =================
+# ================= STEP 2: NANOFILT =================
     FILTERED_READS="$FILT_DIR/filtered_${PREFIX}.fastq.gz"
 
     if [ -s "$FILTERED_READS" ]; then
-         echo "[SKIP] NanoFilt already done"
+         if [ -z "$(gunzip -c "$FILTERED_READS" | head -n 1)" ]; then
+             echo "[RE-RUN] File exists but contains 0 reads. Re-running NanoFilt..."
+             SHOULD_RUN_NANOFILT=true
+         else
+             echo "[SKIP] NanoFilt already done for $PREFIX"
+             SHOULD_RUN_NANOFILT=false
+         fi
     else
-        echo "[RUN] NanoFilt (-q 17 -l 2500)..."
+        SHOULD_RUN_NANOFILT=true
+    fi
+
+    if [ "$SHOULD_RUN_NANOFILT" = true ]; then
+        echo "[RUN] NanoFilt (Strict params: -q 17 -l 2500)..."
         conda activate nanofilt
-        zcat "$INPUT_FILE" | NanoFilt -q 17 -l 2500 | gzip > "$FILTERED_READS"
+        gunzip -c "$INPUT_FILE" | NanoFilt -q 17 -l 2500 | gzip > "$FILTERED_READS"
         conda deactivate
     fi
 
-    if [ ! -s "$FILTERED_READS" ] || [ $(zcat "$FILTERED_READS" | head -n 1 | wc -l) -eq 0 ]; then
-        echo "FAILURE: NanoFilt removed ALL reads for $PREFIX. Skipping sample."
+    FIRST_LINE=$(gunzip -c "$FILTERED_READS" | head -n 1)
+
+    if [ -z "$FIRST_LINE" ]; then
+        echo "----------------------------------------------------------------"
+        echo "   FAILURE: NanoFilt removed ALL reads for $PREFIX."
+        echo "   Reason: Parameters (-q 17 -l 2500) are too strict for this sample."
+        echo "   Action: SKIPPING $PREFIX and moving to the next sample."
+        echo "----------------------------------------------------------------"
         continue
     fi
 
@@ -85,34 +101,33 @@ for INPUT_FILE in "${FILES[@]}"; do
     FINAL_ASSEMBLY="$AUTO_OUT/final_assembly/final_assembly.fasta"
 
     if [ -s "$FINAL_ASSEMBLY" ]; then
-        echo "[SKIP] Autocycler already done"
+        echo "[SKIP] Autocycler already done for $PREFIX"
     else
         echo "[RUN] Autocycler..."
         conda activate autocycler
-        {
-            GENOME_SIZE=$(autocycler helper genome_size --reads "$FILTERED_READS" --threads "$THREADS" | tail -1)
 
-            SUBSAMPLE_DIR="$WORK_DIR/subsampled_${PREFIX}"
-            mkdir -p "$SUBSAMPLE_DIR"
+        {
+            echo "--- Starting Autocycler ---"
+            GENOME_SIZE=$(autocycler helper genome_size --reads "$FILTERED_READS" --threads "$THREADS" 2>&1 | tail -1)
+
+            SUBSAMPLE_DIR="subsampled_reads_${PREFIX}"
             autocycler subsample --reads "$FILTERED_READS" --out_dir "$SUBSAMPLE_DIR" --genome_size "$GENOME_SIZE"
 
             for i in 01 02 03 04; do
-                READS_FILE="$SUBSAMPLE_DIR/sample_${i}.fastq"
-                [ -f "$READS_FILE" ] || continue
-
+                [ -f "$SUBSAMPLE_DIR/sample_${i}.fastq" ] || continue
                 if [ ! -f "$ASSEMBLY_DIR/flye_${i}/assembly.fasta" ]; then
-                     autocycler helper flye --reads "$READS_FILE" \
+                     autocycler helper flye metamdbg miniasm necat nextdenovo plassembler raven --reads "$SUBSAMPLE_DIR/sample_${i}.fastq" \
                         --out_prefix "$ASSEMBLY_DIR/flye_${i}" \
                         --threads "$THREADS" --genome_size "$GENOME_SIZE" \
                         --read_type "ont_r10" --min_depth_rel 0.1
                 fi
             done
 
-            for f in "$ASSEMBLY_DIR"/flye_*/assembly.fasta; do
+            for f in "$ASSEMBLY_DIR"/flye*.fasta; do
                 [ -f "$f" ] && sed -i 's/^>.*$/& Autocycler_consensus_weight=2/' "$f"
             done
             rm -rf "$SUBSAMPLE_DIR"
-
+            
             autocycler compress -i "$ASSEMBLY_DIR" -a "$AUTO_OUT"
             autocycler cluster -a "$AUTO_OUT"
 
@@ -133,16 +148,20 @@ for INPUT_FILE in "${FILES[@]}"; do
 
     # ================= STEP 4: SNIPPY =================
     if [ -s "$SNIPPY_DIR/snps.vcf" ]; then
-        echo "[SKIP] Snippy already done"
+        echo "[SKIP] Snippy already done for $PREFIX"
     else
-        echo "[RUN] Snippy vs Reference..."
+        echo "[RUN] Snippy..."
         conda activate snippy
-        snippy --cpus "$THREADS" --outdir "$SNIPPY_DIR" \
-               --ref "$REF_GENOME" --se "$FILTERED_READS" --force > "$SNIPPY_LOG" 2>&1
+        {
+            snippy --cpus "$THREADS" --outdir "$SNIPPY_DIR" \
+                --ref "$REF_GENOME" --se "$FILTERED_READS" --force
+        } > "$SNIPPY_LOG" 2>&1
         conda deactivate
     fi
 
-    echo "DONE with $PREFIX"
+    echo "Finished processing $PREFIX"
+    echo "--------------------------------------------------"
+
 done
 
-echo "ALL SAMPLES COMPLETED."
+echo "ALL JOBS COMPLETED."

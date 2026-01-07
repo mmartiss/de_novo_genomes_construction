@@ -15,7 +15,8 @@ RUN mamba create -n tb-profiler -c bioconda -c conda-forge tb-profiler -y
 
 RUN mamba create -n nanofilt -c bioconda -c conda-forge nanofilt -y
 
-RUN mamba create -n autocycler -c bioconda -c conda-forge autocycler -y
+RUN mamba create -n autocycler -c bioconda -c conda-forge \
+  autocycler flye raven-assembler miniasm metamdbg necat plassembler nextdenovo -y
 
 RUN mamba create -n snippy -c conda-forge -c bioconda -c defaults snippy perl-bioperl samtools=1.15
 
